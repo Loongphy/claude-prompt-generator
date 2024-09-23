@@ -1,14 +1,17 @@
-import boto3
-from botocore.config import Config
-import json
-import re
-import os
-import pandas as pd
 import io
-import time
+import json
+import os
 import pathlib
+import re
+import time
+
 import gradio as gr
+import pandas as pd
+from dotenv import load_dotenv
+from openai import OpenAI
 from sklearn.metrics import confusion_matrix
+
+load_dotenv()
 
 with open('prompt/error_analysis_classification.prompt') as f:
     error_analysis_prompt = f.read()
@@ -22,45 +25,24 @@ class CalibrationPrompt:
         with open('metaprompt.txt') as f:
             self.metaprompt = f.read()
 
-        region_name = os.getenv("REGION_NAME")
-        session = boto3.Session()
-        retry_config = Config(
-            region_name=region_name,
-            retries={
-                "max_attempts": 5,
-                "mode": "standard",
-            },
+        self.client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_API_BASE")  # 使用自定义的 API URL
         )
-        service_name = "bedrock-runtime"
-        self.bedrock_client = session.client(service_name=service_name, config=retry_config)
+
     def invoke_model(self, prompt, model='haiku'):
         if 'haiku' in model:
-            model = "anthropic.claude-3-haiku-20240307-v1:0"
+            model_id = "claude-3-haiku-20240307"
         else:
-            model = "anthropic.claude-3-sonnet-20240229-v1:0"
-        messages=[
-            {
-                "role": "user",
-                "content":  prompt
-            }
-        ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 4096,
-                "anthropic_version": "bedrock-2023-05-31",
-            }
+            model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
+        
+        response = self.client.chat.completions.create(
+            model=model_id,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=4096
         )
-        modelId = "anthropic.claude-3-haiku-20240307-v1:0"  # anthropic.claude-3-sonnet-20240229-v1:0 "anthropic.claude-3-haiku-20240307-v1:0"
-        accept = "application/json"
-        contentType = "application/json"
+        return response.choices[0].message.content
 
-        response = self.bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
-        message = response_body["content"][0]["text"]
-        return message
     def get_output(self, prompt, dataset, postprocess_code, return_df=False):
         if isinstance(dataset, bytes):
             data_io = io.BytesIO(dataset)
@@ -103,7 +85,7 @@ class CalibrationPrompt:
         mean_score = self.eval_score(dataset)
         errors = self.extract_errors(dataset)
         large_error_to_str = self.large_error_to_str(errors, num_errors)
-        history = self.add_history(dataset, task_description, history, mean_score, errors)
+        history = self.add_history(dataset, task_description, prompt, history, mean_score, errors)
         sorted_history = sorted(history, key=lambda x: x['score'],reverse=False)
         last_history = sorted_history[-3:]
         history_prompt = '\n'.join([self.sample_to_text(sample,
@@ -130,7 +112,6 @@ class CalibrationPrompt:
             'history': history
         }
         
-        
     def get_eval_function(self):
         def set_function_from_iterrow(func):
             def wrapper(dataset):
@@ -138,25 +119,14 @@ class CalibrationPrompt:
                 return dataset
             return wrapper
         return set_function_from_iterrow(lambda record: record['label'] == record['predict'])
+
     def sample_to_text(self, sample: dict, num_errors_per_label: int = 0, is_score: bool = True) -> str:
-        """
-        Return a string that organize the information of from the step run for the meta-prompt
-        :param sample: The eval information for specific step
-        :param num_errors_per_label: The max number of large errors per class that will appear in the meta-prompt
-        :param is_score: If True, add the score information to the meta-prompt
-        :return: A string that contains the information of the step run
-        """
         if is_score:
             return f"<example>\n<prompt_score>\n{sample['score']:.2f}\n</prompt_score>\n<prompt>\n{sample['prompt']}\n</prompt>\n<example>\n"
         else:
             return f"####\n##Prompt:\n{sample['prompt']}\n{self.large_error_to_str(sample['errors'], num_errors_per_label)}####\n "
+
     def large_error_to_str(self, error_df: pd.DataFrame, num_large_errors_per_label: int) -> str:
-        """
-        Return a string that contains the large errors
-        :param error_df: A dataframe contains all the mislabeled samples
-        :param num_large_errors_per_label: The (maximum) number of large errors per label
-        :return: A string that contains the large errors that is used in the meta-prompt
-        """
         required_columns = error_df.columns.tolist()
         label_schema = error_df['label'].unique()
         gt_name = 'GT'
@@ -186,16 +156,14 @@ class CalibrationPrompt:
         dataset = score_func(dataset)
         mean_score = dataset['score'].mean()
         return mean_score
+
     def extract_errors(self, dataset) -> pd.DataFrame:
-        """
-        Extract the errors from the dataset
-        :return: records that contains the errors
-        """
         df = dataset
         err_df = df[df['score'] < 0.5]
         err_df.sort_values(by=['score'])
         return err_df
-    def add_history(self, dataset, task_description, history, mean_score, errors):
+
+    def add_history(self, dataset, task_description, prompt, history, mean_score, errors):
         num_errors = 5
         large_error_to_str = self.large_error_to_str(errors, num_errors)
         prompt_input = {

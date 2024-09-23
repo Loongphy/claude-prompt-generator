@@ -1,38 +1,27 @@
-import json
 import os
 import re
 
-import boto3
-from botocore.config import Config
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
-
 class MetaPrompt:
     def __init__(self):
-        # Get the directory where the current script is located
+        # 获取当前脚本所在目录
         current_script_path = os.path.dirname(os.path.abspath(__file__))
 
-        # Construct the full path to the file
+        # 构建 metaprompt.txt 文件的完整路径
         prompt_guide_path = os.path.join(current_script_path, "metaprompt.txt")
 
-        # Open the file using the full path
+        # 读取 metaprompt.txt 文件内容
         with open(prompt_guide_path, "r") as f:
             self.metaprompt = f.read()
 
-        region_name = os.getenv("REGION_NAME")
-        session = boto3.Session()
-        retry_config = Config(
-            region_name=region_name,
-            retries={
-                "max_attempts": 5,
-                "mode": "standard",
-            },
-        )
-        service_name = "bedrock-runtime"
-        self.bedrock_client = session.client(
-            service_name=service_name, config=retry_config
+        # 初始化 OpenAI 客户端
+        self.client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_API_BASE")  # 使用自定义的 API URL
         )
 
     def __call__(self, task, variables):
@@ -52,36 +41,15 @@ class MetaPrompt:
             {"role": "user", "content": prompt},
             {"role": "assistant", "content": assistant_partial},
         ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 4096,
-                "temperature": 0.0,
-                "anthropic_version": "bedrock-2023-05-31",
-            }
+        print(f"openai.base_url: {self.client.base_url}\n openai.api_key: {self.client.api_key}")
+        print(f"messages: {messages}")
+        response = self.client.chat.completions.create(
+            model="claude-3-haiku-20240307",
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.0
         )
-        modelId = "anthropic.claude-3-haiku-20240307-v1:0"  # anthropic.claude-3-sonnet-20240229-v1:0 "anthropic.claude-3-haiku-20240307-v1:0"
-        accept = "application/json"
-        contentType = "application/json"
-
-        response = self.bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
-        message = response_body["content"][0]["text"]
-
-        def pretty_print(message):
-            print(
-                "\n\n".join(
-                    "\n".join(
-                        line.strip()
-                        for line in re.findall(
-                            r".{1,100}(?:\s+|$)", paragraph.strip("\n")
-                        )
-                    )
-                    for paragraph in re.split(r"\n\n+", message)
-                )
-            )
+        message = response.choices[0].message.content
 
         extracted_prompt_template = self.extract_prompt(message)
         variables = self.extract_variables(message)
@@ -113,10 +81,8 @@ class MetaPrompt:
         variables = re.findall(pattern, prompt)
         return set(variables)
 
-
+# 测试代码（如果需要的话）
 # test = MetaPrompt()
-# TASK = "Draft an email responding to a customer complaint" # Replace with your task!
-# # Optional: specify the input variables you want Claude to use. If you want Claude to choose, you can set `variables` to an empty list!
-
+# TASK = "Draft an email responding to a customer complaint"
 # VARIABLES = ["CUSTOMER_COMPLAINT", "COMPANY_NAME"]
 # test(TASK, VARIABLES)

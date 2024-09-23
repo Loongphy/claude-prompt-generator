@@ -1,18 +1,15 @@
 import json
 import os
-import re
-import threading
 
 import gradio as gr
 from dotenv import load_dotenv
+
 from ape import APE
+from application.soe_prompt import SOEPrompt
 from calibration import CalibrationPrompt
 from metaprompt import MetaPrompt
 from optimize import Alignment
 from translate import GuideBased
-from application.soe_prompt import SOEPrompt
-
-
 
 # Initialize components
 ape = APE()
@@ -204,10 +201,9 @@ with gr.Blocks(title=lang_store[language]["Automatic Prompt Engineering"], theme
                     "anthropic.claude-v2",
                     "anthropic.claude-3-sonnet-20240229-v1:0",
                     "anthropic.claude-3-5-sonnet-20240620-v1:0",
-                    "anthropic.claude-3-haiku-20240307-v1:0",
-
+                    "claude-3-haiku-20240307",
                 ],
-                value="anthropic.claude-3-haiku-20240307-v1:0",
+                value="claude-3-haiku-20240307",
             )
 
             invoke_button = gr.Button(lang_store[language]["Execute prompt"])
@@ -247,9 +243,10 @@ with gr.Blocks(title=lang_store[language]["Automatic Prompt Engineering"], theme
                 label=lang_store[language]["Choose the Evaluation Model"],
                 choices=[
                     "anthropic.claude-3-5-sonnet-20240620-v1:0",
-
+                    "gpt-3.5-turbo",
+                    "gpt-4",
                 ],
-                value="anthropic.claude-3-5-sonnet-20240620-v1:0",
+                value="gpt-3.5-turbo",
             )
             evaluate_button = gr.Button(lang_store[language]["Auto-evaluate the Prompt Effect"])
             evaluate_button.click(

@@ -1,9 +1,7 @@
-import json
 import os
 
-import boto3
-from botocore.config import Config
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -19,16 +17,10 @@ with open(prompt_guide_path, "r") as f:
 
 region_name = os.getenv("REGION_NAME")
 
-session = boto3.Session()
-retry_config = Config(
-    region_name=region_name,
-    retries={
-        "max_attempts": 5,
-        "mode": "standard",
-    },
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_API_BASE")  # 使用自定义的 API URL
 )
-service_name = "bedrock-runtime"
-bedrock_client = session.client(service_name=service_name, config=retry_config)
 
 from rater import Rater
 
@@ -86,31 +78,17 @@ Please only output the rewrite result.
             {
                 "role": "user",
                 "content": prompt.format(guide=PromptGuide, initial=initial_prompt),
-            }  # ,{
-            #   "role": "assistant",
-            #   "content": "{"
-            # }
-        ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 1000,
-                "temperature": 0.8,
-                "top_k": 50,
-                "top_p": 1,
-                "stop_sequences": ["\n\nHuman:"],
-                "anthropic_version": "bedrock-2023-05-31",
             }
+        ]
+        response = client.chat.completions.create(
+            model="anthropic.claude-3-sonnet-20240229-v1:0",
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.8,
+            top_p=1,
+            stop=["\n\nHuman:"]
         )
-        modelId = "anthropic.claude-3-sonnet-20240229-v1:0"  # anthropic.claude-3-sonnet-20240229-v1:0 "anthropic.claude-3-haiku-20240307-v1:0"
-        accept = "application/json"
-        contentType = "application/json"
-
-        response = bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
-        result = response_body["content"][0]["text"].replace("</rewrite>", "").strip()
+        result = response.choices[0].message.content.replace("</rewrite>", "").strip()
         if result.startswith("<instruction>"):
             result = result[13:]
         if result.endswith("</instruction>"):
@@ -147,31 +125,17 @@ Please only output the rewrite result.
                 "content": prompt.format(
                     guide=PromptGuide, initial=initial_prompt, demo=example
                 ),
-            }  # ,{
-            #   "role": "assistant",
-            #   "content": "{"
-            # }
-        ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 1000,
-                "temperature": 0.8,
-                "top_k": 50,
-                "top_p": 1,
-                "stop_sequences": ["\n\nHuman:"],
-                "anthropic_version": "bedrock-2023-05-31",
             }
+        ]
+        response = client.chat.completions.create(
+            model="anthropic.claude-3-sonnet-20240229-v1:0",
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.8,
+            top_p=1,
+            stop=["\n\nHuman:"]
         )
-        modelId = "anthropic.claude-3-sonnet-20240229-v1:0"  # anthropic.claude-3-sonnet-20240229-v1:0 "anthropic.claude-3-haiku-20240307-v1:0"
-        accept = "application/json"
-        contentType = "application/json"
-
-        response = bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
-        result = response_body["content"][0]["text"].replace("</rewrite>", "").strip()
+        result = response.choices[0].message.content.replace("</rewrite>", "").strip()
         if result.startswith("<instruction>"):
             result = result[13:]
         if result.endswith("</instruction>"):

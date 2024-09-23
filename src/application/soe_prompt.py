@@ -1,15 +1,17 @@
-import os
 import base64
-import json
-import boto3
+import os
 
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
 class SOEPrompt:
     def __init__(self, model_id="anthropic.claude-3-sonnet-20240229-v1:0", system='You are an AI assistant that generates SEO-optimized product descriptions.'):
-        self.bedrock_runtime = boto3.client(service_name='bedrock-runtime', region_name=os.getenv("REGION_NAME"))
+        self.client = OpenAI(
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("OPENAI_API_BASE")  # 使用自定义的 API URL
+        )
         self.model_id = model_id
         self.system = system
 
@@ -18,32 +20,27 @@ class SOEPrompt:
             return base64.b64encode(image_file.read()).decode('utf-8')
 
     def run_multi_modal_prompt(self, messages, max_tokens=4000):
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
-            "messages": messages
-        })
-
-        response = self.bedrock_runtime.invoke_model(
-            body=body, modelId=self.model_id)
-        response_body = json.loads(response.get('body').read())
-
-        return response_body
+        response = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=messages,
+            max_tokens=max_tokens
+        )
+        return response.choices[0].message.content
 
     def generate_bedrock_response(self, prompt):
         messages = [{
+            "role": "system",
+            "content": self.system
+        }, {
             "role": "user",
-            "content": [{"type": "text", "text": prompt}]
+            "content": prompt
         }]
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 4000,
-            "messages": messages,
-            "system": self.system,
-        })
-        response = self.bedrock_runtime.invoke_model(body=body, modelId=self.model_id)
-        response_body = json.loads(response.get('body').read())
-        return response_body['content'][0]['text']
+        response = self.client.chat.completions.create(
+            model=self.model_id,
+            messages=messages,
+            max_tokens=4000
+        )
+        return response.choices[0].message.content
 
     def generate_product_description(self, product_category, brand_name, usage_description, target_customer, image_path=None, media_type="image/jpeg"):
         image_description = None
@@ -57,8 +54,7 @@ class SOEPrompt:
                 ]
             }
             messages = [message]
-            response = self.run_multi_modal_prompt(messages, max_tokens=4000)
-            image_description = response['content'][0]['text']
+            image_description = self.run_multi_modal_prompt(messages, max_tokens=4000)
             print("Image description generated: {}".format(image_description))
 
         prompt_template = f"""

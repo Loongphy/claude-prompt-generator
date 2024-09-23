@@ -1,9 +1,8 @@
 import json
 import os
 
-import boto3
-from botocore.config import Config
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
@@ -17,23 +16,15 @@ prompt_guide_path = os.path.join(current_script_path, "PromptGuide.md")
 with open(prompt_guide_path, "r") as f:
     PromptGuide = f.read()
 
-region_name = os.getenv("REGION_NAME")
-
+# Initialize OpenAI client
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url=os.getenv("OPENAI_API_BASE")  # 使用自定义的 API URL
+)
 
 class GuideBased:
     def __init__(self):
-        session = boto3.Session()
-        retry_config = Config(
-            region_name=region_name,
-            retries={
-                "max_attempts": 5,
-                "mode": "standard",
-            },
-        )
-        service_name = "bedrock-runtime"
-        self.bedrock_client = session.client(
-            service_name=service_name, config=retry_config
-        )
+        pass  # 不再需要初始化 AWS 客户端
 
     def __call__(self, initial_prompt):
         lang = self.detect_lang(initial_prompt)
@@ -120,26 +111,15 @@ If the question cannot be answered by the document, say "Cannot answer the quest
             },
             {"role": "assistant", "content": "<rerwited>"},
         ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 4096,
-                "temperature": 0.8,
-                "top_k": 50,
-                "top_p": 1,
-                "stop_sequences": ["</rerwited>"],
-                "anthropic_version": "bedrock-2023-05-31",
-            }
+        response = client.chat.completions.create(
+            model="anthropic.claude-3-5-sonnet-20240620-v1:0",
+            messages=messages,
+            max_tokens=4096,
+            temperature=0.8,
+            top_p=1,
+            stop=["</rerwited>"]
         )
-        modelId = "anthropic.claude-3-5-sonnet-20240620-v1:0"  # anthropic.claude-3-sonnet-20240229-v1:0 "anthropic.claude-3-haiku-20240307-v1:0"
-        accept = "application/json"
-        contentType = "application/json"
-
-        response = self.bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
-        result = response_body["content"][0]["text"].replace("</rewrite>", "").strip()
+        result = response.choices[0].message.content.replace("</rewrite>", "").strip()
         if result.startswith("<instruction>"):
             result = result[13:]
         if result.endswith("</instruction>"):
@@ -168,27 +148,16 @@ Output example: {lang_example}
             },
             {"role": "assistant", "content": "{"},
         ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 1000,
-                "temperature": 0.8,
-                "top_k": 50,
-                "top_p": 1,
-                "stop_sequences": ["\n\nHuman:"],
-                "anthropic_version": "bedrock-2023-05-31",
-            }
+        response = client.chat.completions.create(
+            model="anthropic.claude-3-sonnet-20240229-v1:0",
+            messages=messages,
+            max_tokens=1000,
+            temperature=0.8,
+            top_p=1,
+            stop=["\n\nHuman:"]
         )
-        modelId = "anthropic.claude-3-sonnet-20240229-v1:0"
-        accept = "application/json"
-        contentType = "application/json"
-
-        response = self.bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
         try:
-            lang = json.loads("{" + response_body["content"][0]["text"])["lang"]
+            lang = json.loads("{" + response.choices[0].message.content)["lang"]
         except:
             lang = ""
         return lang
@@ -226,28 +195,17 @@ Use JSON format when returning results. Please only output the result in json fo
             },
             {"role": "assistant", "content": "{"},
         ]
-        body = json.dumps(
-            {
-                "messages": messages,
-                "max_tokens": 128,
-                "temperature": 0.1,
-                "top_k": 50,
-                "top_p": 1,
-                "stop_sequences": ["\n\nHuman:"],
-                "anthropic_version": "bedrock-2023-05-31",
-            }
+        response = client.chat.completions.create(
+            model="claude-3-haiku-20240307",
+            messages=messages,
+            max_tokens=128,
+            temperature=0.1,
+            top_p=1,
+            stop=["\n\nHuman:"]
         )
-        modelId = "anthropic.claude-3-haiku-20240307-v1:0"  # anthropic.claude-3-sonnet-20240229-v1:0
-        accept = "application/json"
-        contentType = "application/json"
-
-        response = self.bedrock_client.invoke_model(
-            body=body, modelId=modelId, accept=accept, contentType=contentType
-        )
-        response_body = json.loads(response.get("body").read())
         final_result = None
         try:
-            result = json.loads("{" + response_body["content"][0]["text"])
+            result = json.loads("{" + response.choices[0].message.content)
             for idx in range(3):
                 if str(idx + 1) in result["Preferred"]:
                     final_result = idx
